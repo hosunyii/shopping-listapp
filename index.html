@@ -148,27 +148,31 @@
     <ul id="list"></ul>
   </div>
 
-<script>
-  const STORAGE_KEY = 'shopping-list-items';
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  const SUPABASE_URL = 'https://ymotawrqfjszzojpbeie.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_lIk88NinoDWlYppJjp8Nfw_nXF-QHcD';
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
   const input = document.getElementById('itemInput');
   const addBtn = document.getElementById('addBtn');
   const list = document.getElementById('list');
   const counter = document.getElementById('counter');
   const clearBtn = document.getElementById('clearBtn');
 
-  let items = loadItems();
+  let items = [];
 
-  function loadItems() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
+  async function loadItems() {
+    const { data, error } = await supabase
+      .from('shopping_items')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) {
+      console.error('아이템 로드 실패:', error);
       return [];
     }
-  }
-
-  function saveItems() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return data ?? [];
   }
 
   function render() {
@@ -211,35 +215,76 @@
     clearBtn.disabled = doneCount === 0;
   }
 
-  function addItem() {
+  async function addItem() {
     const text = input.value.trim();
     if (!text) return;
-    items.push({ id: Date.now() + Math.random(), text, done: false });
     input.value = '';
-    saveItems();
-    render();
     input.focus();
+
+    const { data, error } = await supabase
+      .from('shopping_items')
+      .insert({ text, done: false })
+      .select()
+      .single();
+    if (error) {
+      console.error('아이템 추가 실패:', error);
+      return;
+    }
+    items.push(data);
+    render();
   }
 
-  function toggleItem(id) {
+  async function toggleItem(id) {
     const item = items.find(i => i.id === id);
-    if (item) {
-      item.done = !item.done;
-      saveItems();
+    if (!item) return;
+    const nextDone = !item.done;
+    item.done = nextDone;
+    render();
+
+    const { error } = await supabase
+      .from('shopping_items')
+      .update({ done: nextDone })
+      .eq('id', id);
+    if (error) {
+      console.error('아이템 업데이트 실패:', error);
+      item.done = !nextDone;
       render();
     }
   }
 
-  function deleteItem(id) {
+  async function deleteItem(id) {
+    const prev = items;
     items = items.filter(i => i.id !== id);
-    saveItems();
     render();
+
+    const { error } = await supabase
+      .from('shopping_items')
+      .delete()
+      .eq('id', id);
+    if (error) {
+      console.error('아이템 삭제 실패:', error);
+      items = prev;
+      render();
+    }
   }
 
-  function clearDone() {
+  async function clearDone() {
+    const doneIds = items.filter(i => i.done).map(i => i.id);
+    if (doneIds.length === 0) return;
+
+    const prev = items;
     items = items.filter(i => !i.done);
-    saveItems();
     render();
+
+    const { error } = await supabase
+      .from('shopping_items')
+      .delete()
+      .in('id', doneIds);
+    if (error) {
+      console.error('완료 항목 삭제 실패:', error);
+      items = prev;
+      render();
+    }
   }
 
   addBtn.addEventListener('click', addItem);
@@ -248,6 +293,7 @@
   });
   clearBtn.addEventListener('click', clearDone);
 
+  items = await loadItems();
   render();
 </script>
 </body>
